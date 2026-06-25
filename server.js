@@ -30,6 +30,33 @@ app.use(express.json());
     headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN, 'Content-Type': 'application/json' },
   });
 
+  // ─── OAUTH (app independiente, solo para QR-Pickup) ────────────────────────
+  const QR_CLIENT_ID     = process.env.QR_CLIENT_ID;
+  const QR_CLIENT_SECRET = process.env.QR_CLIENT_SECRET;
+  const QR_SCOPES = 'read_orders,write_orders,read_fulfillments,write_fulfillments,read_locations,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders';
+
+  app.get('/install', (req, res) => {
+    const installUrl = `https://${SHOPIFY_STORE}/admin/oauth/authorize?client_id=${QR_CLIENT_ID}&scope=${QR_SCOPES}&redirect_uri=${APP_URL}/auth/callback&state=install`;
+    res.redirect(installUrl);
+  });
+
+  app.get('/auth/callback', async (req, res) => {
+    const { code } = req.query;
+    if (!code) return res.status(400).send('No code received');
+    try {
+      const tokenRes = await axios.post(`https://${SHOPIFY_STORE}/admin/oauth/access_token`, {
+        client_id: QR_CLIENT_ID,
+        client_secret: QR_CLIENT_SECRET,
+        code,
+      });
+      const accessToken = tokenRes.data.access_token;
+      res.send(`<h2>Token obtenido</h2><p>Agrega este token en Railway (servicio QR-Pickup) como SHOPIFY_TOKEN:</p><pre>${accessToken}</pre>`);
+    } catch (err) {
+      console.error('Error OAuth:', err.response?.data || err.message);
+      res.status(500).send('Error: ' + JSON.stringify(err.response?.data));
+    }
+  });
+
   function loadDB() {
     try { return JSON.parse(fs.readFileSync(DB_PATH, 'utf8')); }
     catch { return { pickups: {} }; }

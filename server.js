@@ -83,14 +83,15 @@ app.use(express.json());
     `;
 
     try {
-      await sgMail.send({ from: 'hola@repdiscosperu.com', to: order.email, subject: 'Tu pedido está listo para recoger 🎶', html });
+      await sgMail.send({ from: { email: 'hola@repdiscosperu.com', name: 'RepDiscosPeru' }, to: order.email, subject: 'Tu pedido está listo para recoger 🎶', html });
       console.log(`📧 QR enviado al cliente: ${order.email}`);
     } catch (err) {
       console.error('❌ Error enviando QR al cliente:', err.message);
     }
 
     try {
-      await sgMail.send({ from: 'hola@repdiscosperu.com', to: NOTIFY_EMAIL, subject: `[Copia] Pedido #${order.order_number} listo — QR enviado`, html });
+      await sgMail.send({ from: { email: 'hola@repdiscosperu.com', name: 'RepDiscosPeru' }, to: NOTIFY_EMAIL, subject: `[Copia] Pedido #${order.order_number} listo — QR enviado`, html });
+      console.log(`📧 Copia enviada a ${NOTIFY_EMAIL}`);
     } catch (err) {
       console.error('❌ Error enviando copia de QR:', err.message);
     }
@@ -267,11 +268,19 @@ app.use(express.json());
     if (pickup.status === 'entregado') return res.json({ ok: false, error: 'Ya fue entregado antes' });
 
     try {
-      const locRes = await shopifyQR.get('/locations.json?limit=1');
-      const locationId = locRes.data.locations?.[0]?.id;
+      const foRes = await shopifyQR.get(`/orders/${pickup.order_id}/fulfillment_orders.json`);
+      const fulfillmentOrders = foRes.data.fulfillment_orders || [];
+      const openFO = fulfillmentOrders.find(fo => fo.status === 'open' || fo.status === 'in_progress') || fulfillmentOrders[0];
 
-      await shopifyQR.post(`/orders/${pickup.order_id}/fulfillments.json`, {
-        fulfillment: { location_id: locationId, notify_customer: false },
+      if (!openFO) {
+        throw new Error('No se encontró una fulfillment order disponible para este pedido');
+      }
+
+      await shopifyQR.post('/fulfillments.json', {
+        fulfillment: {
+          line_items_by_fulfillment_order: [{ fulfillment_order_id: openFO.id }],
+          notify_customer: false,
+        },
       });
 
       pickup.status = 'entregado';
@@ -281,7 +290,7 @@ app.use(express.json());
 
       res.json({ ok: true });
     } catch (err) {
-      console.error('❌ Error marcando fulfillment:', err.response?.data || err.message);
+      console.error('❌ Error marcando fulfillment:', JSON.stringify(err.response?.data || err.message));
       res.json({ ok: false, error: 'Error al actualizar Shopify' });
     }
   });
